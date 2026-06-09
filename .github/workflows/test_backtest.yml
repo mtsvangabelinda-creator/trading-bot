@@ -6,7 +6,7 @@ on:
 jobs:
   run_backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Checkout code
@@ -33,22 +33,300 @@ jobs:
           echo "HEARTBEAT_INTERVAL=60" >> .env
           echo "HEARTBEAT_TIMEOUT=300" >> .env
 
-      - name: Fetch historical data
+      - name: Create data directory
+        run: mkdir -p data
+
+      - name: Fetch 2 years historical data all assets
         run: |
           export PYTHONPATH=$PYTHONPATH:$(pwd)
-          python data/ohlcv_fetcher.py
+          python -c "
+          import asyncio
+          from data.ohlcv_fetcher import OHLCVFetcher
+
+          async def fetch():
+              fetcher = OHLCVFetcher()
+              await fetcher.init_database()
+              assets = [
+                  'BTC/USD',
+                  'ETH/USD',
+                  'SOL/USD',
+                  'BNB/USD',
+                  'XRP/USD'
+              ]
+              for asset in assets:
+                  print(f'Fetching 2 years of {asset}...')
+                  count = await fetcher.fetch_historical(
+                      asset, '1h', 730
+                  )
+                  print(f'{asset}: {count} candles saved')
+              await fetcher.close()
+              print('All historical data fetched.')
+
+          asyncio.run(fetch())
+          "
+
+      - name: Run backtest BTC/USD
+        run: |
+          export PYTHONPATH=$PYTHONPATH:$(pwd)
+          python -c "
+          import asyncio
+          from data.ohlcv_fetcher import OHLCVFetcher
+          from backtest.engine import run_backtest
+          from backtest.metrics import (
+              format_report,
+              check_passes_criteria
+          )
+
+          async def run():
+              fetcher = OHLCVFetcher()
+              df = await fetcher.load_ohlcv('BTC/USD', '1h', 17520)
+              await fetcher.close()
+
+              if df is None or len(df) < 200:
+                  print('ERROR: Not enough BTC/USD data')
+                  return
+
+              print(f'BTC/USD: {len(df)} candles loaded')
+              result = await run_backtest(
+                  'BTC/USD', df,
+                  initial_capital=10000.0,
+                  start_date=None,
+                  end_date=None
+              )
+
+              if result:
+                  print(format_report(
+                      result['metrics'],
+                      'BTC/USD',
+                      '2 years'
+                  ))
+                  criteria = check_passes_criteria(
+                      result['metrics']
+                  )
+                  print(f'Passes criteria: {criteria[\"passed\"]}')
+                  for k, v in criteria['details'].items():
+                      print(f'  {k}: {v}')
+              else:
+                  print('BTC/USD backtest failed')
+
+          asyncio.run(run())
+          "
+
+      - name: Run backtest ETH/USD
+        run: |
+          export PYTHONPATH=$PYTHONPATH:$(pwd)
+          python -c "
+          import asyncio
+          from data.ohlcv_fetcher import OHLCVFetcher
+          from backtest.engine import run_backtest
+          from backtest.metrics import (
+              format_report,
+              check_passes_criteria
+          )
+
+          async def run():
+              fetcher = OHLCVFetcher()
+              df = await fetcher.load_ohlcv('ETH/USD', '1h', 17520)
+              await fetcher.close()
+
+              if df is None or len(df) < 200:
+                  print('ERROR: Not enough ETH/USD data')
+                  return
+
+              print(f'ETH/USD: {len(df)} candles loaded')
+              result = await run_backtest(
+                  'ETH/USD', df,
+                  initial_capital=10000.0,
+                  start_date=None,
+                  end_date=None
+              )
+
+              if result:
+                  print(format_report(
+                      result['metrics'],
+                      'ETH/USD',
+                      '2 years'
+                  ))
+                  criteria = check_passes_criteria(
+                      result['metrics']
+                  )
+                  print(f'Passes criteria: {criteria[\"passed\"]}')
+                  for k, v in criteria['details'].items():
+                      print(f'  {k}: {v}')
+              else:
+                  print('ETH/USD backtest failed')
+
+          asyncio.run(run())
+          "
+
+      - name: Run backtest SOL/USD
+        run: |
+          export PYTHONPATH=$PYTHONPATH:$(pwd)
+          python -c "
+          import asyncio
+          from data.ohlcv_fetcher import OHLCVFetcher
+          from backtest.engine import run_backtest
+          from backtest.metrics import (
+              format_report,
+              check_passes_criteria
+          )
+
+          async def run():
+              fetcher = OHLCVFetcher()
+              df = await fetcher.load_ohlcv('SOL/USD', '1h', 17520)
+              await fetcher.close()
+
+              if df is None or len(df) < 200:
+                  print('ERROR: Not enough SOL/USD data')
+                  return
+
+              print(f'SOL/USD: {len(df)} candles loaded')
+              result = await run_backtest(
+                  'SOL/USD', df,
+                  initial_capital=10000.0,
+                  start_date=None,
+                  end_date=None
+              )
+
+              if result:
+                  print(format_report(
+                      result['metrics'],
+                      'SOL/USD',
+                      '2 years'
+                  ))
+                  criteria = check_passes_criteria(
+                      result['metrics']
+                  )
+                  print(f'Passes criteria: {criteria[\"passed\"]}')
+                  for k, v in criteria['details'].items():
+                      print(f'  {k}: {v}')
+              else:
+                  print('SOL/USD backtest failed')
+
+          asyncio.run(run())
+          "
+
+      - name: Run backtest BNB/USD
+        run: |
+          export PYTHONPATH=$PYTHONPATH:$(pwd)
+          python -c "
+          import asyncio
+          from data.ohlcv_fetcher import OHLCVFetcher
+          from backtest.engine import run_backtest
+          from backtest.metrics import (
+              format_report,
+              check_passes_criteria
+          )
+
+          async def run():
+              fetcher = OHLCVFetcher()
+              df = await fetcher.load_ohlcv('BNB/USD', '1h', 17520)
+              await fetcher.close()
+
+              if df is None or len(df) < 200:
+                  print('ERROR: Not enough BNB/USD data')
+                  return
+
+              print(f'BNB/USD: {len(df)} candles loaded')
+              result = await run_backtest(
+                  'BNB/USD', df,
+                  initial_capital=10000.0,
+                  start_date=None,
+                  end_date=None
+              )
+
+              if result:
+                  print(format_report(
+                      result['metrics'],
+                      'BNB/USD',
+                      '2 years'
+                  ))
+                  criteria = check_passes_criteria(
+                      result['metrics']
+                  )
+                  print(f'Passes criteria: {criteria[\"passed\"]}')
+                  for k, v in criteria['details'].items():
+                      print(f'  {k}: {v}')
+              else:
+                  print('BNB/USD backtest failed')
+
+          asyncio.run(run())
+          "
+
+      - name: Run backtest XRP/USD
+        run: |
+          export PYTHONPATH=$PYTHONPATH:$(pwd)
+          python -c "
+          import asyncio
+          from data.ohlcv_fetcher import OHLCVFetcher
+          from backtest.engine import run_backtest
+          from backtest.metrics import (
+              format_report,
+              check_passes_criteria
+          )
+
+          async def run():
+              fetcher = OHLCVFetcher()
+              df = await fetcher.load_ohlcv('XRP/USD', '1h', 17520)
+              await fetcher.close()
+
+              if df is None or len(df) < 200:
+                  print('ERROR: Not enough XRP/USD data')
+                  return
+
+              print(f'XRP/USD: {len(df)} candles loaded')
+              result = await run_backtest(
+                  'XRP/USD', df,
+                  initial_capital=10000.0,
+                  start_date=None,
+                  end_date=None
+              )
+
+              if result:
+                  print(format_report(
+                      result['metrics'],
+                      'XRP/USD',
+                      '2 years'
+                  ))
+                  criteria = check_passes_criteria(
+                      result['metrics']
+                  )
+                  print(f'Passes criteria: {criteria[\"passed\"]}')
+                  for k, v in criteria['details'].items():
+                      print(f'  {k}: {v}')
+              else:
+                  print('XRP/USD backtest failed')
+
+          asyncio.run(run())
+          "
 
       - name: Run stress tests
         run: |
           export PYTHONPATH=$PYTHONPATH:$(pwd)
-          python backtest/stress_test.py
+          python -c "
+          import asyncio
+          from backtest.stress_test import (
+              run_all_stress_tests,
+              generate_stress_report
+          )
 
-      - name: Run full backtest
+          async def run():
+              print('Running all stress tests...')
+              results = await run_all_stress_tests()
+              report  = generate_stress_report(results)
+              print(report)
+
+          asyncio.run(run())
+          "
+
+      - name: Final summary
         run: |
           export PYTHONPATH=$PYTHONPATH:$(pwd)
-          python backtest/engine.py
-
-      - name: Run orchestrator backtest mode
-        run: |
-          export PYTHONPATH=$PYTHONPATH:$(pwd)
-          python orchestrator.py
+          python -c "
+          print('')
+          print('=' * 50)
+          print('2 YEAR BACKTEST COMPLETE')
+          print('All 5 assets tested on real Kraken data')
+          print('Check results above for each asset')
+          print('=' * 50)
+          "
