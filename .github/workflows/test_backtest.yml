@@ -34,13 +34,21 @@ jobs:
           echo "HEARTBEAT_TIMEOUT=300" >> .env
 
       - name: Fetch historical data
-        run: python data/ohlcv_fetcher.py
+        run: |
+          export PYTHONPATH=$PYTHONPATH:$(pwd)
+          python data/ohlcv_fetcher.py
 
       - name: Run stress tests
-        run: python backtest/stress_test.py
+        run: |
+          export PYTHONPATH=$PYTHONPATH:$(pwd)
+          python backtest/stress_test.py
 
       - name: Run full backtest
-        run: python backtest/engine.py
+        run: |
+          export PYTHONPATH=$PYTHONPATH:$(pwd)
+          python backtest/engine.py
 
       - name: Run orchestrator backtest mode
-        run: python orchestrator.py
+        run: |
+          export PYTHONPATH=$PYTHONPATH:$(pwd)
+          python orchestrator.py
