@@ -33,4 +33,6 @@ jobs:
           echo "HEARTBEAT_TIMEOUT=300" >> .env
 
       - name: Test Telegram connection
-        run: python telegram_bot/alerts.py
+        run: |
+          export PYTHONPATH=$PYTHONPATH:$(pwd)
+          python telegram_bot/alerts.py
