@@ -1,0 +1,46 @@
+name: Run Full Backtest
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run_backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create .env file
+        run: |
+          echo "KRAKEN_API_KEY=${{ secrets.KRAKEN_API_KEY }}" >> .env
+          echo "KRAKEN_API_SECRET=${{ secrets.KRAKEN_API_SECRET }}" >> .env
+          echo "KRAKEN_CANCEL_KEY=${{ secrets.KRAKEN_CANCEL_KEY }}" >> .env
+          echo "KRAKEN_CANCEL_SECRET=${{ secrets.KRAKEN_CANCEL_SECRET }}" >> .env
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> .env
+          echo "TELEGRAM_AUTHORISED_USER_ID=${{ secrets.TELEGRAM_AUTHORISED_USER_ID }}" >> .env
+          echo "ENVIRONMENT=backtest" >> .env
+          echo "HEARTBEAT_FILE_PATH=data/heartbeat.txt" >> .env
+          echo "HEARTBEAT_INTERVAL=60" >> .env
+          echo "HEARTBEAT_TIMEOUT=300" >> .env
+
+      - name: Fetch historical data
+        run: python data/ohlcv_fetcher.py
+
+      - name: Run stress tests
+        run: python backtest/stress_test.py
+
+      - name: Run full backtest
+        run: python backtest/engine.py
+
+      - name: Run orchestrator backtest mode
+        run: python orchestrator.py
