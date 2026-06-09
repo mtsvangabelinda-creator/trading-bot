@@ -56,7 +56,8 @@ jobs:
               for asset in assets:
                   print(f'Fetching 2 years of {asset}...')
                   count = await fetcher.fetch_historical(
-                      asset, '1h', 730
+                      asset, '1d', 730
+                  )
                   )
                   print(f'{asset}: {count} candles saved')
               await fetcher.close()
@@ -79,7 +80,7 @@ jobs:
 
           async def run():
               fetcher = OHLCVFetcher()
-              df = await fetcher.load_ohlcv('BTC/USD', '1h', 17520)
+              df = await fetcher.load_ohlcv('BTC/USD', '1d', 730)
               await fetcher.close()
 
               if df is None or len(df) < 200:
