@@ -117,13 +117,24 @@ async def run_backtest(
         open_position   = None
         peak_equity     = initial_capital
 
+        # ── Per-trade edge score diagnostics ─────────────────
+        print(f'\n{"="*60}')
+        print(f'TRADE LOG — {asset}')
+        print(f'{"="*60}')
+        print(f'{"#":<4} {"Strategy":<18} {"Dir":<6} {"Score":<7} '
+              f'{"Hurst":<7} {"AC":<7} {"PEC":<7} {"RVR":<7} '
+              f'{"Regime":<8} {"PnL":>8} {"Exit"}')
+        print(f'{"-"*100}')
+
+        trade_num = 0
+
         logger.info(
             f'{asset}: {len(df)} candles loaded for backtest'
         )
 
         for i in range(MIN_LOOKBACK, len(df)):
             # Current candle
-            candle      = df.iloc[i]
+            candle        = df.iloc[i]
             current_price = float(candle['close'])
             candle_high   = float(candle['high'])
             candle_low    = float(candle['low'])
@@ -142,7 +153,6 @@ async def run_backtest(
                 )
 
                 if stop_hit or tp_hit:
-                    # Exit position
                     exit_price = (
                         open_position['stop_price']
                         if stop_hit
@@ -167,27 +177,52 @@ async def run_backtest(
                     equity += pnl
                     equity_curve.append(round(equity, 2))
 
+                    exit_reason = 'stop' if stop_hit else 'tp'
+
                     trade_record = {
-                        'asset':       asset,
-                        'strategy':    open_position['strategy'],
-                        'direction':   open_position['direction'],
-                        'entry_price': open_position['entry_price'],
-                        'exit_price':  round(exit_price, 4),
-                        'size':        open_position['size'],
-                        'pnl':         pnl,
-                        'exit_reason': (
-                            'stop' if stop_hit else 'take_profit'
-                        ),
-                        'entry_time':  open_position['entry_time'],
-                        'exit_time':   str(candle['timestamp'])
+                        'asset':        asset,
+                        'strategy':     open_position['strategy'],
+                        'direction':    open_position['direction'],
+                        'entry_price':  open_position['entry_price'],
+                        'exit_price':   round(exit_price, 4),
+                        'size':         open_position['size'],
+                        'pnl':          pnl,
+                        'exit_reason':  exit_reason,
+                        'entry_time':   open_position['entry_time'],
+                        'exit_time':    str(candle['timestamp']),
+                        # ── Edge Score components ─────────────
+                        'edge_score':   open_position['edge_score'],
+                        'hurst':        open_position['hurst'],
+                        'autocorr':     open_position['autocorr'],
+                        'pec':          open_position['pec'],
+                        'rvr_ratio':    open_position['rvr_ratio'],
+                        'rvr_regime':   open_position['rvr_regime'],
+                        'sentiment':    open_position['sentiment']
                     }
                     trades.append(trade_record)
+
+                    # ── Print trade diagnostic line ───────────
+                    trade_num += 1
+                    pnl_str = f'${pnl:+.2f}'
+                    print(
+                        f'{trade_num:<4} '
+                        f'{open_position["strategy"]:<18} '
+                        f'{open_position["direction"]:<6} '
+                        f'{open_position["edge_score"]:<7.3f} '
+                        f'{open_position["hurst"]:<7.3f} '
+                        f'{open_position["autocorr"]:<7.3f} '
+                        f'{open_position["pec"]:<7.3f} '
+                        f'{open_position["rvr_ratio"]:<7.3f} '
+                        f'{open_position["rvr_regime"]:<8} '
+                        f'{pnl_str:>8} '
+                        f'{exit_reason}'
+                    )
+
                     open_position = None
 
                     if equity > peak_equity:
                         peak_equity = equity
 
-                    # Check drawdown halt
                     if (peak_equity - equity) / peak_equity > 0.15:
                         logger.warning(
                             f'{asset}: Peak halt triggered '
@@ -214,10 +249,10 @@ async def run_backtest(
                 equity_curve.append(round(equity, 2))
                 continue
 
-            strategy    = edge['primary_strategy']
-            edge_score  = edge['position_size_factor']
-            rvr_mult    = edge.get('rvr_regime', 'NORMAL')
-            rvr_m       = (
+            strategy   = edge['primary_strategy']
+            edge_score = edge['position_size_factor']
+            rvr_mult   = edge.get('rvr_regime', 'NORMAL')
+            rvr_m      = (
                 0.5 if rvr_mult == 'DANGER' else
                 0.0 if rvr_mult == 'DEAD' else 1.0
             )
@@ -256,7 +291,6 @@ async def run_backtest(
                     continue
 
             else:
-                # Scalper follows sentiment
                 if sentiment == 'BULLISH':
                     direction = 'long'
                 elif sentiment == 'BEARISH':
@@ -306,6 +340,7 @@ async def run_backtest(
                     atr * ATR_MULTIPLIER * TP_MULTIPLIER
                 )
 
+            # ── Store edge components with position ───────────
             open_position = {
                 'direction':   direction,
                 'entry_price': entry_price,
@@ -314,10 +349,22 @@ async def run_backtest(
                 'size':        size,
                 'strategy':    strategy,
                 'entry_fee':   entry_sim['fee_paid'],
-                'entry_time':  str(candle['timestamp'])
+                'entry_time':  str(candle['timestamp']),
+                'edge_score':  edge_score,
+                'hurst':       edge.get('hurst', 0.0),
+                'autocorr':    edge.get('autocorr', 0.0),
+                'pec':         edge.get('pec', 0.0),
+                'rvr_ratio':   edge.get('rvr_ratio', 0.0),
+                'rvr_regime':  rvr_mult,
+                'sentiment':   sentiment
             }
 
             equity_curve.append(round(equity, 2))
+
+        # Print trade log footer
+        print(f'{"-"*100}')
+        print(f'Total trades: {trade_num}')
+        print(f'{"="*60}\n')
 
         # Close any remaining position
         if open_position is not None:
@@ -337,16 +384,23 @@ async def run_backtest(
             )
             equity += pnl
             trades.append({
-                'asset':       asset,
-                'strategy':    open_position['strategy'],
-                'direction':   open_position['direction'],
-                'entry_price': open_position['entry_price'],
-                'exit_price':  round(final_price, 4),
-                'size':        open_position['size'],
-                'pnl':         pnl,
-                'exit_reason': 'end_of_data',
-                'entry_time':  open_position['entry_time'],
-                'exit_time':   str(df.iloc[-1]['timestamp'])
+                'asset':        asset,
+                'strategy':     open_position['strategy'],
+                'direction':    open_position['direction'],
+                'entry_price':  open_position['entry_price'],
+                'exit_price':   round(final_price, 4),
+                'size':         open_position['size'],
+                'pnl':          pnl,
+                'exit_reason':  'end_of_data',
+                'entry_time':   open_position['entry_time'],
+                'exit_time':    str(df.iloc[-1]['timestamp']),
+                'edge_score':   open_position['edge_score'],
+                'hurst':        open_position['hurst'],
+                'autocorr':     open_position['autocorr'],
+                'pec':          open_position['pec'],
+                'rvr_ratio':    open_position['rvr_ratio'],
+                'rvr_regime':   open_position['rvr_regime'],
+                'sentiment':    open_position['sentiment']
             })
 
         metrics = calculate_all_metrics(trades, equity_curve)
@@ -441,7 +495,6 @@ async def run_walk_forward(
             f'Running walk-forward validation for {asset}'
         )
 
-        # Test on final year only
         test_start = '2024-01-01'
         test_end   = BACKTEST_END_DATE
 
@@ -509,7 +562,6 @@ if __name__ == '__main__':
         print('\n=== MODULE 18c — BACKTEST ENGINE TESTS ===\n')
         np.random.seed(42)
 
-        # Build 300 candle synthetic dataset
         n     = 300
         close = np.cumsum(
             np.random.normal(0.1, 50, n)
@@ -529,7 +581,6 @@ if __name__ == '__main__':
             'volume':    np.random.uniform(100, 500, n)
         })
 
-        # Test 1 — Run backtest on synthetic data
         print('Test 1: Running backtest on 300 candles...')
         result = await run_backtest(
             'BTC/USD', df,
@@ -554,7 +605,6 @@ if __name__ == '__main__':
         else:
             print('Test 1: FAILED\n')
 
-        # Test 2 — Metrics
         print('Test 2: Metrics calculation...')
         if result and result['metrics']:
             m = result['metrics']
@@ -572,7 +622,6 @@ if __name__ == '__main__':
         else:
             print('Test 2: FAILED\n')
 
-        # Test 3 — Format report
         print('Test 3: Format report...')
         if result:
             report = format_report(
