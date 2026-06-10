@@ -14,7 +14,12 @@ ASSETS = {
 
 # ── Decision Engine ───────────────────────────────────────────
 HURST_LOOKBACK         = 100
-EDGE_SCORE_WEIGHTS     = {'hurst': 0.4, 'autocorr': 0.3, 'pec': 0.3}
+EDGE_SCORE_WEIGHTS     = {
+    'hurst':   0.35,
+    'autocorr': 0.25,
+    'pec':     0.25,
+    'rvr':     0.15
+}
 REGIME_CHECK_INTERVAL  = 900
 SENTIMENT_INTERVAL     = 3600
 CHAOTIC_ATR_MULTIPLIER = 2.0
