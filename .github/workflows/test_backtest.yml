@@ -52,21 +52,21 @@ jobs:
                   'SOL/USD',
                   'BNB/USD',
                   'XRP/USD'
-             ]
-             for asset in assets:
-                 print(f'Fetching 2 years of {asset}...')
-                 count = await fetcher.fetch_historical(
-                     asset, '1d', 730
-                 )
-                 df = await fetcher.load_ohlcv(asset, '1d', 730)
-                 if df is not None and len(df) > 0:
-                     print(f'{asset}: {count} candles saved, range {df.index[0]} to {df.index[-1]}')
-                 else:
-                     print(f'{asset}: {count} candles saved, no data loaded')
-    await fetcher.close()
-    print('All historical data fetched.')
+              ]
+              for asset in assets:
+                  print(f'Fetching 2 years of {asset}...')
+                  count = await fetcher.fetch_historical(
+                      asset, '1d', 730
+                  )
+                  df = await fetcher.load_ohlcv(asset, '1d', 730)
+                  if df is not None and len(df) > 0:
+                      print(f'{asset}: {count} candles saved, range {df.index[0]} to {df.index[-1]}')
+                  else:
+                      print(f'{asset}: {count} candles saved, no data loaded')
+              await fetcher.close()
+              print('All historical data fetched.')
 
-asyncio.run(fetch())
+          asyncio.run(fetch())
           "
 
       - name: Run backtest BTC/USD
