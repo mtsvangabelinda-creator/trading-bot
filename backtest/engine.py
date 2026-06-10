@@ -354,7 +354,7 @@ async def run_backtest(
                 'hurst':       edge.get('hurst', 0.0),
                 'autocorr':    edge.get('autocorr', 0.0),
                 'pec':         edge.get('pec', 0.0),
-                'rvr_ratio':   edge.get('rvr_ratio', 0.0),
+                'rvr_ratio':   edge.get('rvr', 0.0),
                 'rvr_regime':  rvr_mult,
                 'sentiment':   sentiment
             }
