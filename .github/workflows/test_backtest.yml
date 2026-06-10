@@ -126,7 +126,7 @@ jobs:
 
           async def run():
               fetcher = OHLCVFetcher()
-              df = await fetcher.load_ohlcv('ETH/USD', '1h', 17520)
+              df = await fetcher.load_ohlcv('ETH/USD', '1d', 730)
               await fetcher.close()
 
               if df is None or len(df) < 200:
@@ -173,7 +173,7 @@ jobs:
 
           async def run():
               fetcher = OHLCVFetcher()
-              df = await fetcher.load_ohlcv('SOL/USD', '1h', 17520)
+              df = await fetcher.load_ohlcv('SOL/USD', '1d', 730)
               await fetcher.close()
 
               if df is None or len(df) < 200:
@@ -220,7 +220,7 @@ jobs:
 
           async def run():
               fetcher = OHLCVFetcher()
-              df = await fetcher.load_ohlcv('BNB/USD', '1h', 17520)
+              df = await fetcher.load_ohlcv('BNB/USD', '1d', 730)
               await fetcher.close()
 
               if df is None or len(df) < 200:
@@ -267,7 +267,7 @@ jobs:
 
           async def run():
               fetcher = OHLCVFetcher()
-              df = await fetcher.load_ohlcv('XRP/USD', '1h', 17520)
+              df = await fetcher.load_ohlcv('XRP/USD', '1d', 730)
               await fetcher.close()
 
               if df is None or len(df) < 200:
