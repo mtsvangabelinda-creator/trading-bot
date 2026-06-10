@@ -58,7 +58,6 @@ jobs:
                   count = await fetcher.fetch_historical(
                       asset, '1d', 730
                   )
-                  )
                   print(f'{asset}: {count} candles saved')
               await fetcher.close()
               print('All historical data fetched.')
