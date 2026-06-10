@@ -77,7 +77,6 @@ def calculate(
             chaotic       = tripwire['triggered']
             chaotic_ratio = tripwire['ratio']
 
-        # If chaotic block everything immediately
         if chaotic:
             logger.warning(
                 f'Chaotic Tripwire fired — ratio={chaotic_ratio}'
@@ -113,59 +112,58 @@ def calculate(
         h_result = hurst_confidence(close)
         if h_result is None:
             failed_signals += 1
-            hurst_val         = 0.5
-            hurst_regime      = 'DEAD_ZONE'
-            hurst_conf        = 0.0
-            hurst_tf_factor   = 0.0
-            hurst_mr_factor   = 0.0
+            hurst_val       = 0.5
+            hurst_regime    = 'DEAD_ZONE'
+            hurst_conf      = 0.0
+            hurst_tf_factor = 0.0
+            hurst_mr_factor = 0.0
         else:
-            hurst_val         = h_result['hurst']
-            hurst_regime      = h_result['regime']
-            hurst_conf        = h_result['confidence']
-            hurst_tf_factor   = h_result['trend_factor']
-            hurst_mr_factor   = h_result['reversion_factor']
+            hurst_val       = h_result['hurst']
+            hurst_regime    = h_result['regime']
+            hurst_conf      = h_result['confidence']
+            hurst_tf_factor = h_result['trend_factor']
+            hurst_mr_factor = h_result['reversion_factor']
 
         # Autocorrelation
         ac_result = autocorr_signal(close)
         if ac_result is None:
             failed_signals += 1
-            autocorr_val      = 0.0
-            autocorr_sig      = 'NEUTRAL'
-            autocorr_tf       = 0.0
-            autocorr_mr       = 0.0
+            autocorr_val  = 0.0
+            autocorr_sig  = 'NEUTRAL'
+            autocorr_tf   = 0.0
+            autocorr_mr   = 0.0
         else:
-            autocorr_val      = ac_result['autocorr']
-            autocorr_sig      = ac_result['signal']
-            autocorr_tf       = ac_result['trend_factor']
-            autocorr_mr       = ac_result['reversion_factor']
+            autocorr_val  = ac_result['autocorr']
+            autocorr_sig  = ac_result['signal']
+            autocorr_tf   = ac_result['trend_factor']
+            autocorr_mr   = ac_result['reversion_factor']
 
         # PEC
         p_result = pec_signal(close)
         if p_result is None:
             failed_signals += 1
-            pec_val           = 0.5
-            pec_sig           = 'NEUTRAL'
-            pec_tf            = 0.0
-            pec_mr            = 0.0
+            pec_val = 0.5
+            pec_sig = 'NEUTRAL'
+            pec_tf  = 0.0
+            pec_mr  = 0.0
         else:
-            pec_val           = p_result['pec']
-            pec_sig           = p_result['signal']
-            pec_tf            = p_result['trend_factor']
-            pec_mr            = p_result['reversion_factor']
+            pec_val = p_result['pec']
+            pec_sig = p_result['signal']
+            pec_tf  = p_result['trend_factor']
+            pec_mr  = p_result['reversion_factor']
 
         # RVR
         r_result = rvr_signal(high, low, close)
         if r_result is None:
             failed_signals += 1
-            rvr_val           = 1.0
-            rvr_regime        = 'NORMAL'
-            rvr_multiplier    = 1.0
+            rvr_val        = 1.0
+            rvr_regime     = 'NORMAL'
+            rvr_multiplier = 1.0
         else:
-            rvr_val           = r_result['rvr']
-            rvr_regime        = r_result['regime']
-            rvr_multiplier    = r_result['size_multiplier']
+            rvr_val        = r_result['rvr']
+            rvr_regime     = r_result['regime']
+            rvr_multiplier = r_result['size_multiplier']
 
-        # If more than 2 signals failed return None
         if failed_signals > 2:
             logger.error(
                 f'calculate: too many signal failures '
@@ -176,16 +174,28 @@ def calculate(
         # ── Step 3: Calculate Composite Edge Scores ───────────
         weights = EDGE_SCORE_WEIGHTS
 
+        # Normalize RVR into 0-1 factors for scoring
+        # RVR > 1.0 = expanding volatility = favours trend following
+        # RVR < 1.0 = contracting volatility = favours mean reversion
+        rvr_tf_factor = float(
+            np.clip((rvr_val - 1.0) / 2.0, 0.0, 1.0)
+        )
+        rvr_mr_factor = float(
+            np.clip((2.0 - rvr_val) / 2.0, 0.0, 1.0)
+        )
+
         tf_raw = (
-            hurst_tf_factor   * weights['hurst'] +
-            autocorr_tf       * weights['autocorr'] +
-            pec_tf            * weights['pec']
+            hurst_tf_factor * weights['hurst'] +
+            autocorr_tf     * weights['autocorr'] +
+            pec_tf          * weights['pec'] +
+            rvr_tf_factor   * weights.get('rvr', 0.15)
         )
 
         mr_raw = (
-            hurst_mr_factor   * weights['hurst'] +
-            autocorr_mr       * weights['autocorr'] +
-            pec_mr            * weights['pec']
+            hurst_mr_factor * weights['hurst'] +
+            autocorr_mr     * weights['autocorr'] +
+            pec_mr          * weights['pec'] +
+            rvr_mr_factor   * weights.get('rvr', 0.15)
         )
 
         # ── Step 4: Apply RVR multiplier ──────────────────────
@@ -196,15 +206,23 @@ def calculate(
             float(np.clip(mr_raw * rvr_multiplier, 0.0, 1.0)), 4
         )
 
-        # Scalper score
+        # ── Step 5: Scalper score — dynamic ───────────────────
+        # Strong TF/MR signal = low scalper score (don't scalp)
+        # Weak TF/MR signal   = higher scalper score (scalp ok)
+        best_signal = max(tf_final, mr_final)
         if rvr_regime == 'DANGER':
             scalper_score = SCALPER_DANGER_SCORE
         elif rvr_regime == 'DEAD':
-            scalper_score = SCALPER_BASE_SCORE
+            scalper_score = 0.0
         else:
-            scalper_score = SCALPER_BASE_SCORE
+            scalper_score = round(
+                float(np.clip(
+                    SCALPER_BASE_SCORE * (1.0 - best_signal),
+                    0.3, 0.5
+                )), 4
+            )
 
-        # ── Step 5: Strategy Selection ────────────────────────
+        # ── Step 6: Strategy Selection ────────────────────────
         if (
             tf_final > mr_final and
             tf_final > ACTIVATION_THRESHOLD
@@ -221,13 +239,13 @@ def calculate(
             primary_strategy     = 'SCALPER'
             position_size_factor = scalper_score
 
-        # ── Step 6: Overall confidence ────────────────────────
+        # ── Step 7: Overall confidence ────────────────────────
         score_margin = abs(tf_final - mr_final)
         confidence   = round(
             (hurst_conf + score_margin) / 2, 4
         )
 
-        # ── Step 7: Build reasoning string ────────────────────
+        # ── Step 8: Build reasoning string ────────────────────
         reasoning = (
             f'Hurst={hurst_val} ({hurst_regime}), '
             f'Autocorr={autocorr_val} ({autocorr_sig}), '
@@ -292,7 +310,9 @@ def calculate_all(
                     f'score={result["position_size_factor"]}'
                 )
         except Exception as e:
-            logger.error(f'calculate_all failed for {asset}: {e}')
+            logger.error(
+                f'calculate_all failed for {asset}: {e}'
+            )
             results[asset] = None
 
     return results
@@ -312,7 +332,9 @@ def get_summary(results: dict) -> str:
         lines = ['EDGE SCORES', '─' * 30]
         for asset, result in results.items():
             if result is None:
-                lines.append(f'{asset}: ERROR — calculation failed')
+                lines.append(
+                    f'{asset}: ERROR — calculation failed'
+                )
             elif result.get('chaotic'):
                 lines.append(
                     f'{asset}: BLOCKED — Chaotic Tripwire fired'
@@ -356,9 +378,10 @@ if __name__ == '__main__':
     c, h, l = build_dataset(trend_close)
     result = calculate(c, h, l)
     if result:
-        print(f'  Strategy: {result["primary_strategy"]}')
-        print(f'  TF Score: {result["tf_score"]}')
-        print(f'  MR Score: {result["mr_score"]}')
+        print(f'  Strategy:  {result["primary_strategy"]}')
+        print(f'  TF Score:  {result["tf_score"]}')
+        print(f'  MR Score:  {result["mr_score"]}')
+        print(f'  RVR:       {result["rvr"]}')
         print(f'  Reasoning: {result["reasoning"]}')
         passed = result['primary_strategy'] == 'TREND_FOLLOWING'
         print(f'Test 1: {"PASSED" if passed else "FAILED"}\n')
@@ -375,9 +398,10 @@ if __name__ == '__main__':
     c2, h2, l2 = build_dataset(np.array(mr_prices), vol=0.3)
     result2 = calculate(c2, h2, l2)
     if result2:
-        print(f'  Strategy: {result2["primary_strategy"]}')
-        print(f'  TF Score: {result2["tf_score"]}')
-        print(f'  MR Score: {result2["mr_score"]}')
+        print(f'  Strategy:  {result2["primary_strategy"]}')
+        print(f'  TF Score:  {result2["tf_score"]}')
+        print(f'  MR Score:  {result2["mr_score"]}')
+        print(f'  RVR:       {result2["rvr"]}')
         passed = result2['primary_strategy'] == 'MEAN_REVERSION'
         print(f'Test 2: {"PASSED" if passed else "FAILED"}\n')
     else:
@@ -392,14 +416,13 @@ if __name__ == '__main__':
     l3 = pd.Series(
         chaotic_close - np.abs(np.random.normal(0, 1, n))
     )
-    # Inject massive spike in last 10 candles
     h3.iloc[-10:] = chaotic_close[-10:] + 50
     l3.iloc[-10:] = chaotic_close[-10:] - 50
     c3 = pd.Series(chaotic_close)
     result3 = calculate(c3, h3, l3)
     if result3:
         print(f'  Strategy: {result3["primary_strategy"]}')
-        print(f'  Chaotic: {result3["chaotic"]}')
+        print(f'  Chaotic:  {result3["chaotic"]}')
         passed = result3['primary_strategy'] == 'BLOCKED'
         print(f'Test 3: {"PASSED" if passed else "FAILED"}\n')
     else:
@@ -414,6 +437,7 @@ if __name__ == '__main__':
         print(f'  Strategy: {result4["primary_strategy"]}')
         print(f'  TF Score: {result4["tf_score"]}')
         print(f'  MR Score: {result4["mr_score"]}')
+        print(f'  RVR:      {result4["rvr"]}')
         print('Test 4: PASSED\n')
     else:
         print('Test 4: FAILED — no result\n')
@@ -429,7 +453,8 @@ if __name__ == '__main__':
         if res:
             print(
                 f'  {asset}: {res["primary_strategy"]} '
-                f'score={res["position_size_factor"]}'
+                f'score={res["position_size_factor"]} '
+                f'rvr={res["rvr"]}'
             )
     print('Test 5: PASSED\n')
 
@@ -450,4 +475,4 @@ if __name__ == '__main__':
     print(
         '=== MODULE 07 — EDGE SCORE: '
         f'{"ALL TESTS PASSED" if all_passed else "SOME TESTS FAILED"} ==='
-          )
+            )
