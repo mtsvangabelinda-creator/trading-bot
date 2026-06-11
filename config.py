@@ -24,6 +24,10 @@ REGIME_CHECK_INTERVAL  = 900
 SENTIMENT_INTERVAL     = 3600
 CHAOTIC_ATR_MULTIPLIER = 2.0
 
+# ── Multi-Timeframe Bias ───────────────────────────────────────
+BIAS_SMA_PERIOD        = 50
+BIAS_NEUTRAL_BAND      = 0.005
+
 # ── Position Sizing ───────────────────────────────────────────
 ATR_PERIOD             = 14
 ATR_MULTIPLIER         = 1.5
@@ -66,6 +70,10 @@ BACKTEST_START_DATE    = '2020-01-01'
 BACKTEST_END_DATE      = '2025-01-01'
 MAKER_FEE              = 0.0016
 TAKER_FEE              = 0.0026
+
+# ── Walk-Forward Backtesting ───────────────────────────────────
+WALK_FORWARD_MONTHS           = 18
+WALK_FORWARD_LOOKBACK_MONTHS  = 3
 
 # ── Logging ───────────────────────────────────────────────────
 LOG_MAX_BYTES          = 10485760
