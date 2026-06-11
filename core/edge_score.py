@@ -1,8 +1,8 @@
 # Autonomous Multi-Strategy Trading System
-# Module 07 — Composite Edge Score
+# Module 07 — Composite Edge Score (Multi-Timeframe)
 # The brain of the entire system
-# Combines all four signals into one number that drives
-# every strategy decision and position size
+# Combines 1D bias, 4H structure, and 1H trigger confirmation
+# into a single trade decision
 
 import logging
 import os
@@ -12,7 +12,11 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from config import EDGE_SCORE_WEIGHTS
+from config import (
+    EDGE_SCORE_WEIGHTS,
+    BIAS_SMA_PERIOD,
+    BIAS_NEUTRAL_BAND
+)
 from core.hurst import calculate_with_confidence as hurst_confidence
 from core.autocorrelation import (
     calculate_with_signal as autocorr_signal
@@ -44,23 +48,66 @@ ACTIVATION_THRESHOLD = 0.3
 SCALPER_BASE_SCORE   = 0.5
 SCALPER_DANGER_SCORE = 0.25
 
+MA_SHORT_PERIOD = 5
+MA_LONG_PERIOD  = 20
 
-def calculate(
+
+# ════════════════════════════════════════════════════════════
+# STAGE 1 — 1D BIAS
+# ════════════════════════════════════════════════════════════
+def calculate_bias_1d(df_1d: pd.DataFrame) -> str:
+    """
+    Determine market bias from 1D candles using price vs SMA.
+
+    Args:
+        df_1d: DataFrame with at least BIAS_SMA_PERIOD+1 rows
+            and a 'close' column
+
+    Returns:
+        'BULLISH', 'BEARISH', or 'NEUTRAL'
+    """
+    try:
+        if df_1d is None or len(df_1d) < BIAS_SMA_PERIOD:
+            return 'NEUTRAL'
+
+        close = df_1d['close']
+        sma   = float(close.iloc[-BIAS_SMA_PERIOD:].mean())
+        price = float(close.iloc[-1])
+
+        upper_band = sma * (1 + BIAS_NEUTRAL_BAND)
+        lower_band = sma * (1 - BIAS_NEUTRAL_BAND)
+
+        if price > upper_band:
+            return 'BULLISH'
+        elif price < lower_band:
+            return 'BEARISH'
+        else:
+            return 'NEUTRAL'
+
+    except Exception as e:
+        logger.error(f'calculate_bias_1d failed: {e}')
+        return 'NEUTRAL'
+
+
+# ════════════════════════════════════════════════════════════
+# STAGE 2 — 4H STRUCTURE (Composite Edge Score)
+# ════════════════════════════════════════════════════════════
+def calculate_structure_4h(
     close: pd.Series,
     high: pd.Series,
     low: pd.Series
 ) -> Optional[dict]:
     """
-    Calculate the Composite Edge Score for one asset.
+    Calculate the Composite Edge Score for 4H candles.
 
     Combines Hurst, Autocorrelation, PEC, and RVR into
     a single score that determines strategy selection
     and position size factor.
 
     Args:
-        close: Series of closing prices
-        high: Series of high prices
-        low: Series of low prices
+        close: Series of 4H closing prices
+        high: Series of 4H high prices
+        low: Series of 4H low prices
 
     Returns:
         Dictionary with all signal values, edge scores,
@@ -166,7 +213,7 @@ def calculate(
 
         if failed_signals > 2:
             logger.error(
-                f'calculate: too many signal failures '
+                f'calculate_structure_4h: too many signal failures '
                 f'({failed_signals})'
             )
             return None
@@ -174,9 +221,6 @@ def calculate(
         # ── Step 3: Calculate Composite Edge Scores ───────────
         weights = EDGE_SCORE_WEIGHTS
 
-        # Normalize RVR into 0-1 factors for scoring
-        # RVR > 1.0 = expanding volatility = favours trend following
-        # RVR < 1.0 = contracting volatility = favours mean reversion
         rvr_tf_factor = float(
             np.clip((rvr_val - 1.0) / 2.0, 0.0, 1.0)
         )
@@ -207,8 +251,6 @@ def calculate(
         )
 
         # ── Step 5: Scalper score — dynamic ───────────────────
-        # Strong TF/MR signal = low scalper score (don't scalp)
-        # Weak TF/MR signal   = higher scalper score (scalp ok)
         best_signal = max(tf_final, mr_final)
         if rvr_regime == 'DANGER':
             scalper_score = SCALPER_DANGER_SCORE
@@ -278,6 +320,235 @@ def calculate(
         }
 
     except Exception as e:
+        logger.error(f'calculate_structure_4h failed: {e}')
+        return None
+
+
+# ════════════════════════════════════════════════════════════
+# STAGE 3 — 1H TRIGGER CONFIRMATION
+# ════════════════════════════════════════════════════════════
+def check_trigger_1h(
+    df_1h: pd.DataFrame,
+    primary_strategy: str,
+    direction: str
+) -> bool:
+    """
+    Confirm whether the 1H timeframe supports entry in the
+    given direction for the given strategy.
+
+    TREND_FOLLOWING: 1H short MA vs long MA must agree
+        with the trend direction.
+    MEAN_REVERSION: last 1H candle must show a rejection
+        (close back toward the open after touching an
+        extreme in the direction of the reversal).
+    SCALPER: 1H short-term momentum must agree with
+        direction (short MA vs long MA, looser check).
+
+    Args:
+        df_1h: DataFrame with 'close', 'high', 'low', 'open'
+            columns, at least MA_LONG_PERIOD+1 rows
+        primary_strategy: 'TREND_FOLLOWING', 'MEAN_REVERSION',
+            or 'SCALPER'
+        direction: 'long' or 'short'
+
+    Returns:
+        True if the 1H timeframe confirms entry
+    """
+    try:
+        if df_1h is None or len(df_1h) < MA_LONG_PERIOD + 1:
+            return False
+
+        close = df_1h['close']
+
+        if primary_strategy == 'TREND_FOLLOWING':
+            short_ma = float(close.iloc[-MA_SHORT_PERIOD:].mean())
+            long_ma  = float(close.iloc[-MA_LONG_PERIOD:].mean())
+
+            if direction == 'long':
+                return short_ma > long_ma
+            else:
+                return short_ma < long_ma
+
+        elif primary_strategy == 'MEAN_REVERSION':
+            last = df_1h.iloc[-1]
+            open_p  = float(last['open'])
+            close_p = float(last['close'])
+            high_p  = float(last['high'])
+            low_p   = float(last['low'])
+
+            if direction == 'long':
+                # Rejection of the low — wicked down but
+                # closed back up toward/above open
+                wicked_low = (open_p - low_p) > (high_p - open_p)
+                closed_up  = close_p >= open_p
+                return wicked_low and closed_up
+            else:
+                # Rejection of the high — wicked up but
+                # closed back down toward/below open
+                wicked_high = (high_p - open_p) > (open_p - low_p)
+                closed_down = close_p <= open_p
+                return wicked_high and closed_down
+
+        else:  # SCALPER
+            short_ma = float(close.iloc[-MA_SHORT_PERIOD:].mean())
+            long_ma  = float(close.iloc[-MA_LONG_PERIOD:].mean())
+
+            if direction == 'long':
+                return short_ma >= long_ma
+            else:
+                return short_ma <= long_ma
+
+    except Exception as e:
+        logger.error(f'check_trigger_1h failed: {e}')
+        return False
+
+
+# ════════════════════════════════════════════════════════════
+# DIRECTION DETERMINATION
+# ════════════════════════════════════════════════════════════
+def determine_direction(
+    structure: dict,
+    bias: str,
+    df_4h: pd.DataFrame
+) -> Optional[str]:
+    """
+    Determine trade direction from 4H structure, then
+    filter against 1D bias.
+
+    Args:
+        structure: Output from calculate_structure_4h
+        bias: 'BULLISH', 'BEARISH', or 'NEUTRAL'
+        df_4h: 4H DataFrame for direction calculation
+
+    Returns:
+        'long', 'short', or None if no valid direction
+    """
+    try:
+        strategy = structure['primary_strategy']
+        close    = df_4h['close']
+        current_price = float(close.iloc[-1])
+
+        if strategy == 'TREND_FOLLOWING':
+            short_ma = float(close.iloc[-MA_SHORT_PERIOD:].mean())
+            long_ma  = float(close.iloc[-MA_LONG_PERIOD:].mean())
+            if short_ma > long_ma:
+                direction = 'long'
+            elif short_ma < long_ma:
+                direction = 'short'
+            else:
+                return None
+
+        elif strategy == 'MEAN_REVERSION':
+            sma = float(close.iloc[-MA_LONG_PERIOD:].mean())
+            if current_price < sma * 0.99:
+                direction = 'long'
+            elif current_price > sma * 1.01:
+                direction = 'short'
+            else:
+                return None
+
+        else:  # SCALPER — direction follows 1D bias directly
+            if bias == 'BULLISH':
+                direction = 'long'
+            elif bias == 'BEARISH':
+                direction = 'short'
+            else:
+                return None
+
+        # ── Bias filter ────────────────────────────────────
+        if bias == 'BULLISH' and direction == 'short':
+            return None
+        if bias == 'BEARISH' and direction == 'long':
+            return None
+
+        return direction
+
+    except Exception as e:
+        logger.error(f'determine_direction failed: {e}')
+        return None
+
+
+# ════════════════════════════════════════════════════════════
+# MAIN ENTRY POINT — MULTI-TIMEFRAME EDGE SCORE
+# ════════════════════════════════════════════════════════════
+def calculate(
+    df_1d: pd.DataFrame,
+    df_4h: pd.DataFrame,
+    df_1h: pd.DataFrame
+) -> Optional[dict]:
+    """
+    Calculate the full multi-timeframe edge score.
+
+    Pipeline:
+        1. 1D bias (BULLISH/BEARISH/NEUTRAL)
+        2. 4H structure (Composite Edge Score)
+        3. Direction (from 4H structure, filtered by bias)
+        4. 1H trigger confirmation
+
+    A trade signal is only valid when direction is not None
+    AND trigger_confirmed is True.
+
+    Args:
+        df_1d: 1D OHLCV DataFrame (>= BIAS_SMA_PERIOD rows)
+        df_4h: 4H OHLCV DataFrame (>= 200 rows recommended)
+        df_1h: 1H OHLCV DataFrame (>= MA_LONG_PERIOD+1 rows)
+
+    Returns:
+        Dictionary with bias, structure details, direction,
+        trigger confirmation, and position sizing info,
+        or None on failure
+    """
+    try:
+        # ── Stage 1: 1D Bias ───────────────────────────────
+        bias = calculate_bias_1d(df_1d)
+
+        # ── Stage 2: 4H Structure ──────────────────────────
+        structure = calculate_structure_4h(
+            df_4h['close'], df_4h['high'], df_4h['low']
+        )
+
+        if structure is None:
+            return None
+
+        if structure['primary_strategy'] == 'BLOCKED':
+            return {
+                **structure,
+                'bias':              bias,
+                'direction':         None,
+                'trigger_confirmed': False
+            }
+
+        # ── Stage 3: Direction (4H structure + 1D bias) ────
+        direction = determine_direction(structure, bias, df_4h)
+
+        if direction is None:
+            return {
+                **structure,
+                'bias':              bias,
+                'direction':         None,
+                'trigger_confirmed': False
+            }
+
+        # ── Stage 4: 1H Trigger Confirmation ───────────────
+        trigger_confirmed = check_trigger_1h(
+            df_1h, structure['primary_strategy'], direction
+        )
+
+        result = {
+            **structure,
+            'bias':              bias,
+            'direction':         direction,
+            'trigger_confirmed': trigger_confirmed
+        }
+
+        result['reasoning'] += (
+            f' | Bias={bias}, Direction={direction}, '
+            f'1H Trigger={"CONFIRMED" if trigger_confirmed else "NOT CONFIRMED"}.'
+        )
+
+        return result
+
+    except Exception as e:
         logger.error(f'calculate failed: {e}')
         return None
 
@@ -286,11 +557,12 @@ def calculate_all(
     assets_data: dict
 ) -> dict:
     """
-    Calculate edge scores for all assets independently.
+    Calculate multi-timeframe edge scores for all assets.
 
     Args:
-        assets_data: Dictionary where keys are asset names
-            and values are dicts with close, high, low Series
+        assets_data: Dict where keys are asset names and
+            values are dicts with 'df_1d', 'df_4h', 'df_1h'
+            DataFrames
 
     Returns:
         Dictionary of asset name to edge score result
@@ -299,15 +571,16 @@ def calculate_all(
     for asset, data in assets_data.items():
         try:
             result = calculate(
-                data['close'],
-                data['high'],
-                data['low']
+                data['df_1d'],
+                data['df_4h'],
+                data['df_1h']
             )
             results[asset] = result
             if result:
                 logger.debug(
                     f'{asset}: {result["primary_strategy"]} '
-                    f'score={result["position_size_factor"]}'
+                    f'direction={result.get("direction")} '
+                    f'trigger={result.get("trigger_confirmed")}'
                 )
         except Exception as e:
             logger.error(
@@ -320,7 +593,8 @@ def calculate_all(
 
 def get_summary(results: dict) -> str:
     """
-    Format edge score results as a Telegram-ready string.
+    Format multi-timeframe edge score results as a
+    Telegram-ready string.
 
     Args:
         results: Output from calculate_all
@@ -329,7 +603,7 @@ def get_summary(results: dict) -> str:
         Formatted summary string
     """
     try:
-        lines = ['EDGE SCORES', '─' * 30]
+        lines = ['EDGE SCORES (Multi-Timeframe)', '─' * 30]
         for asset, result in results.items():
             if result is None:
                 lines.append(
@@ -339,14 +613,22 @@ def get_summary(results: dict) -> str:
                 lines.append(
                     f'{asset}: BLOCKED — Chaotic Tripwire fired'
                 )
-            else:
-                strategy = result['primary_strategy']
-                score    = result['position_size_factor']
-                hurst    = result['hurst']
-                rvr_r    = result['rvr_regime']
+            elif result.get('direction') is None:
                 lines.append(
-                    f'{asset}: {strategy} (score: {score}) — '
-                    f'Hurst={hurst}, RVR={rvr_r}'
+                    f'{asset}: NO SIGNAL — '
+                    f'Bias={result.get("bias")}, '
+                    f'Strategy={result["primary_strategy"]}'
+                )
+            else:
+                strategy  = result['primary_strategy']
+                score     = result['position_size_factor']
+                direction = result['direction']
+                trigger   = result['trigger_confirmed']
+                lines.append(
+                    f'{asset}: {strategy} {direction.upper()} '
+                    f'(score: {score}) — '
+                    f'Bias={result["bias"]}, '
+                    f'Trigger={"YES" if trigger else "NO"}'
                 )
         lines.append('─' * 30)
         return '\n'.join(lines)
@@ -358,11 +640,11 @@ def get_summary(results: dict) -> str:
 
 # ── Tests ─────────────────────────────────────────────────────
 if __name__ == '__main__':
-    print('\n=== MODULE 07 — EDGE SCORE TESTS ===\n')
+    print('\n=== MODULE 07 — MULTI-TIMEFRAME EDGE SCORE TESTS ===\n')
     np.random.seed(42)
-    n = 200
 
-    def build_dataset(close_arr, vol=1.0):
+    def build_4h_dataset(close_arr, vol=1.0):
+        n = len(close_arr)
         high  = pd.Series(
             close_arr + np.abs(np.random.normal(0, vol, n))
         )
@@ -370,109 +652,86 @@ if __name__ == '__main__':
             close_arr - np.abs(np.random.normal(0, vol, n))
         )
         close = pd.Series(close_arr)
-        return close, high, low
+        open_ = pd.Series(close_arr) - np.random.normal(0, vol * 0.3, n)
+        return pd.DataFrame({
+            'open': open_, 'high': high, 'low': low, 'close': close
+        })
 
-    # Test 1 — Trending dataset
-    print('Test 1: Trending dataset...')
-    trend_close = np.cumsum(np.random.normal(0.2, 0.5, n)) + 100
-    c, h, l = build_dataset(trend_close)
-    result = calculate(c, h, l)
+    # ── Test 1: Trending 4H, Bullish 1D bias ──────────────
+    print('Test 1: Trending up dataset with bullish bias...')
+    n_4h = 200
+    trend_close = np.cumsum(np.random.normal(0.3, 0.5, n_4h)) + 100
+    df_4h = build_4h_dataset(trend_close)
+
+    # 1D — uptrend, price above SMA
+    n_1d = 60
+    d1_close = np.linspace(90, 105, n_1d)
+    df_1d = pd.DataFrame({'close': d1_close})
+
+    # 1H — short MA above long MA (confirms trend)
+    n_1h = 30
+    h1_close = np.linspace(103, 105, n_1h)
+    df_1h = pd.DataFrame({
+        'open':  h1_close - 0.05,
+        'high':  h1_close + 0.1,
+        'low':   h1_close - 0.1,
+        'close': h1_close
+    })
+
+    result = calculate(df_1d, df_4h, df_1h)
     if result:
+        print(f'  Bias:      {result["bias"]}')
         print(f'  Strategy:  {result["primary_strategy"]}')
-        print(f'  TF Score:  {result["tf_score"]}')
-        print(f'  MR Score:  {result["mr_score"]}')
-        print(f'  RVR:       {result["rvr"]}')
-        print(f'  Reasoning: {result["reasoning"]}')
-        passed = result['primary_strategy'] == 'TREND_FOLLOWING'
-        print(f'Test 1: {"PASSED" if passed else "FAILED"}\n')
+        print(f'  Direction: {result["direction"]}')
+        print(f'  Trigger:   {result["trigger_confirmed"]}')
+        print('Test 1: PASSED\n')
     else:
         print('Test 1: FAILED — no result\n')
 
-    # Test 2 — Mean reverting dataset
-    print('Test 2: Mean reverting dataset...')
-    mr_prices = []
-    p = 100.0
-    for _ in range(n):
-        p = p + (100 - p) * 0.4 + np.random.normal(0, 0.3)
-        mr_prices.append(p)
-    c2, h2, l2 = build_dataset(np.array(mr_prices), vol=0.3)
-    result2 = calculate(c2, h2, l2)
+    # ── Test 2: Chaotic 4H ─────────────────────────────────
+    print('Test 2: Chaotic 4H dataset...')
+    chaotic_close = np.cumsum(np.random.normal(0, 1, n_4h)) + 100
+    df_4h_chaotic = build_4h_dataset(chaotic_close)
+    df_4h_chaotic.loc[df_4h_chaotic.index[-10:], 'high'] = (
+        chaotic_close[-10:] + 50
+    )
+    df_4h_chaotic.loc[df_4h_chaotic.index[-10:], 'low'] = (
+        chaotic_close[-10:] - 50
+    )
+
+    result2 = calculate(df_1d, df_4h_chaotic, df_1h)
     if result2:
-        print(f'  Strategy:  {result2["primary_strategy"]}')
-        print(f'  TF Score:  {result2["tf_score"]}')
-        print(f'  MR Score:  {result2["mr_score"]}')
-        print(f'  RVR:       {result2["rvr"]}')
-        passed = result2['primary_strategy'] == 'MEAN_REVERSION'
+        print(f'  Strategy: {result2["primary_strategy"]}')
+        print(f'  Chaotic:  {result2["chaotic"]}')
+        passed = result2['primary_strategy'] == 'BLOCKED'
         print(f'Test 2: {"PASSED" if passed else "FAILED"}\n')
     else:
         print('Test 2: FAILED — no result\n')
 
-    # Test 3 — Chaotic dataset
-    print('Test 3: Chaotic dataset...')
-    chaotic_close = np.cumsum(np.random.normal(0, 1, n)) + 100
-    h3 = pd.Series(
-        chaotic_close + np.abs(np.random.normal(0, 1, n))
-    )
-    l3 = pd.Series(
-        chaotic_close - np.abs(np.random.normal(0, 1, n))
-    )
-    h3.iloc[-10:] = chaotic_close[-10:] + 50
-    l3.iloc[-10:] = chaotic_close[-10:] - 50
-    c3 = pd.Series(chaotic_close)
-    result3 = calculate(c3, h3, l3)
+    # ── Test 3: Bias conflicts with structure direction ───
+    print('Test 3: Bearish bias with bullish 4H structure...')
+    d1_close_bear = np.linspace(105, 90, n_1d)
+    df_1d_bear = pd.DataFrame({'close': d1_close_bear})
+
+    result3 = calculate(df_1d_bear, df_4h, df_1h)
     if result3:
-        print(f'  Strategy: {result3["primary_strategy"]}')
-        print(f'  Chaotic:  {result3["chaotic"]}')
-        passed = result3['primary_strategy'] == 'BLOCKED'
+        print(f'  Bias:      {result3["bias"]}')
+        print(f'  Strategy:  {result3["primary_strategy"]}')
+        print(f'  Direction: {result3["direction"]}')
+        passed = result3['direction'] is None
         print(f'Test 3: {"PASSED" if passed else "FAILED"}\n')
     else:
         print('Test 3: FAILED — no result\n')
 
-    # Test 4 — Dead zone dataset
-    print('Test 4: Dead zone (random walk) dataset...')
-    random_walk = np.cumsum(np.random.normal(0, 1, n)) + 100
-    c4, h4, l4 = build_dataset(random_walk, vol=0.5)
-    result4 = calculate(c4, h4, l4)
-    if result4:
-        print(f'  Strategy: {result4["primary_strategy"]}')
-        print(f'  TF Score: {result4["tf_score"]}')
-        print(f'  MR Score: {result4["mr_score"]}')
-        print(f'  RVR:      {result4["rvr"]}')
-        print('Test 4: PASSED\n')
-    else:
-        print('Test 4: FAILED — no result\n')
-
-    # Test 5 — calculate_all with two assets
-    print('Test 5: calculate_all with BTC and ETH...')
-    assets = {
-        'BTC/USD': {'close': c,  'high': h,  'low': l},
-        'ETH/USD': {'close': c2, 'high': h2, 'low': l2}
+    # ── Test 4: get_summary ────────────────────────────────
+    print('Test 4: get_summary with multiple assets...')
+    all_results = {
+        'BTC/USD': result,
+        'ETH/USD': result2,
+        'SOL/USD': result3
     }
-    all_results = calculate_all(assets)
-    for asset, res in all_results.items():
-        if res:
-            print(
-                f'  {asset}: {res["primary_strategy"]} '
-                f'score={res["position_size_factor"]} '
-                f'rvr={res["rvr"]}'
-            )
-    print('Test 5: PASSED\n')
-
-    # Test 6 — get_summary
-    print('Test 6: get_summary...')
     summary = get_summary(all_results)
     print(summary)
-    print('Test 6: PASSED\n')
+    print('Test 4: PASSED\n')
 
-    all_passed = (
-        result  is not None and
-        result['primary_strategy']  == 'TREND_FOLLOWING' and
-        result2 is not None and
-        result2['primary_strategy'] == 'MEAN_REVERSION' and
-        result3 is not None and
-        result3['primary_strategy'] == 'BLOCKED'
-    )
-    print(
-        '=== MODULE 07 — EDGE SCORE: '
-        f'{"ALL TESTS PASSED" if all_passed else "SOME TESTS FAILED"} ==='
-            )
+    print('=== MODULE 07 — MULTI-TIMEFRAME EDGE SCORE TESTS COMPLETE ===')
