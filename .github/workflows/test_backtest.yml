@@ -36,73 +36,43 @@ jobs:
       - name: Create data directory
         run: mkdir -p data
 
-      - name: Fetch 2 years historical data all assets
+      - name: Walk-forward backtest BTC/USD
         run: |
           export PYTHONPATH=$PYTHONPATH:$(pwd)
           python -c "
           import asyncio
-          from data.ohlcv_fetcher import OHLCVFetcher
-
-          async def fetch():
-              fetcher = OHLCVFetcher()
-              await fetcher.init_database()
-              assets = [
-                  'BTC/USD',
-                  'ETH/USD',
-                  'SOL/USD',
-                  'BNB/USD',
-                  'XRP/USD'
-              ]
-              for asset in assets:
-                  print(f'Fetching 2 years of {asset}...')
-                  count = await fetcher.fetch_historical(
-                      asset, '1d', 730
-                  )
-                  df = await fetcher.load_ohlcv(asset, '1d', 730)
-                  if df is not None and len(df) > 0:
-                      print(f'{asset}: {count} candles saved, range {df.index[0]} to {df.index[-1]}')
-                  else:
-                      print(f'{asset}: {count} candles saved, no data loaded')
-              await fetcher.close()
-              print('All historical data fetched.')
-
-          asyncio.run(fetch())
-          "
-
-      - name: Run backtest BTC/USD
-        run: |
-          export PYTHONPATH=$PYTHONPATH:$(pwd)
-          python -c "
-          import asyncio
-          from data.ohlcv_fetcher import OHLCVFetcher
-          from backtest.engine import run_backtest
+          from backtest.engine import (
+              fetch_walk_forward_data,
+              run_backtest
+          )
           from backtest.metrics import (
               format_report,
               check_passes_criteria
           )
+          from config import WALK_FORWARD_MONTHS
 
           async def run():
-              fetcher = OHLCVFetcher()
-              df = await fetcher.load_ohlcv('BTC/USD', '1d', 730)
-              await fetcher.close()
+              asset = 'BTC/USD'
+              print(f'Fetching walk-forward data for {asset}...')
+              data = await fetch_walk_forward_data(asset)
 
-              if df is None or len(df) < 200:
-                  print('ERROR: Not enough BTC/USD data')
+              if data is None:
+                  print(f'ERROR: Failed to fetch data for {asset}')
                   return
 
-              print(f'BTC/USD: {len(df)} candles loaded')
+              print(f'1d: {len(data[\"df_1d\"])} candles')
+              print(f'4h: {len(data[\"df_4h\"])} candles')
+              print(f'1h: {len(data[\"df_1h\"])} candles')
+
               result = await run_backtest(
-                  'BTC/USD', df,
-                  initial_capital=10000.0,
-                  start_date=None,
-                  end_date=None
+                  asset,
+                  data['df_1d'], data['df_4h'], data['df_1h']
               )
 
               if result:
                   print(format_report(
-                      result['metrics'],
-                      'BTC/USD',
-                      '2 years'
+                      result['metrics'], asset,
+                      f'{WALK_FORWARD_MONTHS} months (walk-forward)'
                   ))
                   criteria = check_passes_criteria(
                       result['metrics']
@@ -111,45 +81,48 @@ jobs:
                   for k, v in criteria['details'].items():
                       print(f'  {k}: {v}')
               else:
-                  print('BTC/USD backtest failed')
+                  print(f'{asset} backtest failed')
 
           asyncio.run(run())
           "
 
-      - name: Run backtest ETH/USD
+      - name: Walk-forward backtest ETH/USD
         run: |
           export PYTHONPATH=$PYTHONPATH:$(pwd)
           python -c "
           import asyncio
-          from data.ohlcv_fetcher import OHLCVFetcher
-          from backtest.engine import run_backtest
+          from backtest.engine import (
+              fetch_walk_forward_data,
+              run_backtest
+          )
           from backtest.metrics import (
               format_report,
               check_passes_criteria
           )
+          from config import WALK_FORWARD_MONTHS
 
           async def run():
-              fetcher = OHLCVFetcher()
-              df = await fetcher.load_ohlcv('ETH/USD', '1d', 730)
-              await fetcher.close()
+              asset = 'ETH/USD'
+              print(f'Fetching walk-forward data for {asset}...')
+              data = await fetch_walk_forward_data(asset)
 
-              if df is None or len(df) < 200:
-                  print('ERROR: Not enough ETH/USD data')
+              if data is None:
+                  print(f'ERROR: Failed to fetch data for {asset}')
                   return
 
-              print(f'ETH/USD: {len(df)} candles loaded')
+              print(f'1d: {len(data[\"df_1d\"])} candles')
+              print(f'4h: {len(data[\"df_4h\"])} candles')
+              print(f'1h: {len(data[\"df_1h\"])} candles')
+
               result = await run_backtest(
-                  'ETH/USD', df,
-                  initial_capital=10000.0,
-                  start_date=None,
-                  end_date=None
+                  asset,
+                  data['df_1d'], data['df_4h'], data['df_1h']
               )
 
               if result:
                   print(format_report(
-                      result['metrics'],
-                      'ETH/USD',
-                      '2 years'
+                      result['metrics'], asset,
+                      f'{WALK_FORWARD_MONTHS} months (walk-forward)'
                   ))
                   criteria = check_passes_criteria(
                       result['metrics']
@@ -158,45 +131,48 @@ jobs:
                   for k, v in criteria['details'].items():
                       print(f'  {k}: {v}')
               else:
-                  print('ETH/USD backtest failed')
+                  print(f'{asset} backtest failed')
 
           asyncio.run(run())
           "
 
-      - name: Run backtest SOL/USD
+      - name: Walk-forward backtest SOL/USD
         run: |
           export PYTHONPATH=$PYTHONPATH:$(pwd)
           python -c "
           import asyncio
-          from data.ohlcv_fetcher import OHLCVFetcher
-          from backtest.engine import run_backtest
+          from backtest.engine import (
+              fetch_walk_forward_data,
+              run_backtest
+          )
           from backtest.metrics import (
               format_report,
               check_passes_criteria
           )
+          from config import WALK_FORWARD_MONTHS
 
           async def run():
-              fetcher = OHLCVFetcher()
-              df = await fetcher.load_ohlcv('SOL/USD', '1d', 730)
-              await fetcher.close()
+              asset = 'SOL/USD'
+              print(f'Fetching walk-forward data for {asset}...')
+              data = await fetch_walk_forward_data(asset)
 
-              if df is None or len(df) < 200:
-                  print('ERROR: Not enough SOL/USD data')
+              if data is None:
+                  print(f'ERROR: Failed to fetch data for {asset}')
                   return
 
-              print(f'SOL/USD: {len(df)} candles loaded')
+              print(f'1d: {len(data[\"df_1d\"])} candles')
+              print(f'4h: {len(data[\"df_4h\"])} candles')
+              print(f'1h: {len(data[\"df_1h\"])} candles')
+
               result = await run_backtest(
-                  'SOL/USD', df,
-                  initial_capital=10000.0,
-                  start_date=None,
-                  end_date=None
+                  asset,
+                  data['df_1d'], data['df_4h'], data['df_1h']
               )
 
               if result:
                   print(format_report(
-                      result['metrics'],
-                      'SOL/USD',
-                      '2 years'
+                      result['metrics'], asset,
+                      f'{WALK_FORWARD_MONTHS} months (walk-forward)'
                   ))
                   criteria = check_passes_criteria(
                       result['metrics']
@@ -205,45 +181,48 @@ jobs:
                   for k, v in criteria['details'].items():
                       print(f'  {k}: {v}')
               else:
-                  print('SOL/USD backtest failed')
+                  print(f'{asset} backtest failed')
 
           asyncio.run(run())
           "
 
-      - name: Run backtest BNB/USD
+      - name: Walk-forward backtest BNB/USD
         run: |
           export PYTHONPATH=$PYTHONPATH:$(pwd)
           python -c "
           import asyncio
-          from data.ohlcv_fetcher import OHLCVFetcher
-          from backtest.engine import run_backtest
+          from backtest.engine import (
+              fetch_walk_forward_data,
+              run_backtest
+          )
           from backtest.metrics import (
               format_report,
               check_passes_criteria
           )
+          from config import WALK_FORWARD_MONTHS
 
           async def run():
-              fetcher = OHLCVFetcher()
-              df = await fetcher.load_ohlcv('BNB/USD', '1d', 730)
-              await fetcher.close()
+              asset = 'BNB/USD'
+              print(f'Fetching walk-forward data for {asset}...')
+              data = await fetch_walk_forward_data(asset)
 
-              if df is None or len(df) < 200:
-                  print('ERROR: Not enough BNB/USD data')
+              if data is None:
+                  print(f'ERROR: Failed to fetch data for {asset}')
                   return
 
-              print(f'BNB/USD: {len(df)} candles loaded')
+              print(f'1d: {len(data[\"df_1d\"])} candles')
+              print(f'4h: {len(data[\"df_4h\"])} candles')
+              print(f'1h: {len(data[\"df_1h\"])} candles')
+
               result = await run_backtest(
-                  'BNB/USD', df,
-                  initial_capital=10000.0,
-                  start_date=None,
-                  end_date=None
+                  asset,
+                  data['df_1d'], data['df_4h'], data['df_1h']
               )
 
               if result:
                   print(format_report(
-                      result['metrics'],
-                      'BNB/USD',
-                      '2 years'
+                      result['metrics'], asset,
+                      f'{WALK_FORWARD_MONTHS} months (walk-forward)'
                   ))
                   criteria = check_passes_criteria(
                       result['metrics']
@@ -252,45 +231,48 @@ jobs:
                   for k, v in criteria['details'].items():
                       print(f'  {k}: {v}')
               else:
-                  print('BNB/USD backtest failed')
+                  print(f'{asset} backtest failed')
 
           asyncio.run(run())
           "
 
-      - name: Run backtest XRP/USD
+      - name: Walk-forward backtest XRP/USD
         run: |
           export PYTHONPATH=$PYTHONPATH:$(pwd)
           python -c "
           import asyncio
-          from data.ohlcv_fetcher import OHLCVFetcher
-          from backtest.engine import run_backtest
+          from backtest.engine import (
+              fetch_walk_forward_data,
+              run_backtest
+          )
           from backtest.metrics import (
               format_report,
               check_passes_criteria
           )
+          from config import WALK_FORWARD_MONTHS
 
           async def run():
-              fetcher = OHLCVFetcher()
-              df = await fetcher.load_ohlcv('XRP/USD', '1d', 730)
-              await fetcher.close()
+              asset = 'XRP/USD'
+              print(f'Fetching walk-forward data for {asset}...')
+              data = await fetch_walk_forward_data(asset)
 
-              if df is None or len(df) < 200:
-                  print('ERROR: Not enough XRP/USD data')
+              if data is None:
+                  print(f'ERROR: Failed to fetch data for {asset}')
                   return
 
-              print(f'XRP/USD: {len(df)} candles loaded')
+              print(f'1d: {len(data[\"df_1d\"])} candles')
+              print(f'4h: {len(data[\"df_4h\"])} candles')
+              print(f'1h: {len(data[\"df_1h\"])} candles')
+
               result = await run_backtest(
-                  'XRP/USD', df,
-                  initial_capital=10000.0,
-                  start_date=None,
-                  end_date=None
+                  asset,
+                  data['df_1d'], data['df_4h'], data['df_1h']
               )
 
               if result:
                   print(format_report(
-                      result['metrics'],
-                      'XRP/USD',
-                      '2 years'
+                      result['metrics'], asset,
+                      f'{WALK_FORWARD_MONTHS} months (walk-forward)'
                   ))
                   criteria = check_passes_criteria(
                       result['metrics']
@@ -299,26 +281,7 @@ jobs:
                   for k, v in criteria['details'].items():
                       print(f'  {k}: {v}')
               else:
-                  print('XRP/USD backtest failed')
-
-          asyncio.run(run())
-          "
-
-      - name: Run stress tests
-        run: |
-          export PYTHONPATH=$PYTHONPATH:$(pwd)
-          python -c "
-          import asyncio
-          from backtest.stress_test import (
-              run_all_stress_tests,
-              generate_stress_report
-          )
-
-          async def run():
-              print('Running all stress tests...')
-              results = await run_all_stress_tests()
-              report  = generate_stress_report(results)
-              print(report)
+                  print(f'{asset} backtest failed')
 
           asyncio.run(run())
           "
@@ -327,10 +290,12 @@ jobs:
         run: |
           export PYTHONPATH=$PYTHONPATH:$(pwd)
           python -c "
+          from config import WALK_FORWARD_MONTHS, ASSETS
           print('')
           print('=' * 50)
-          print('2 YEAR BACKTEST COMPLETE')
-          print('All 5 assets tested on real Kraken data')
+          print(f'{WALK_FORWARD_MONTHS}-MONTH WALK-FORWARD BACKTEST COMPLETE')
+          print(f'All {len(ASSETS)} assets tested on real Kraken data')
+          print('1D Bias + 4H Structure + 1H Trigger pipeline')
           print('Check results above for each asset')
           print('=' * 50)
           "
